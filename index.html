@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>₿ Blackjack</title>
+
+<!-- PWA bits -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js'));
+  }
+</script>
+
+<style>
+  :root{
+    --bg:#0b0f14;
+    --panel:#121820;
+    --panel-2:#0f141b;
+    --text:#e6e6e6;
+    --muted:#99a3af;
+    --accent:#f7931a;
+    --win:#2ecc71;
+    --lose:#ff4d4f;
+    --push:#ffd166;
+    --card:#1a2230;
+    --card-border:#293243;
+    --shadow: 0 10px 24px rgba(0,0,0,.4);
+    --radius:16px;
+  }
+  *{box-sizing:border-box}
+  html,body{background:var(--bg); color:var(--text); margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial; -webkit-font-smoothing:antialiased}
+  .wrap{max-width:720px; margin:0 auto; padding:16px 16px 24px}
+  header{display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 0 14px}
+  .title{display:flex; align-items:center; gap:10px; font-weight:700; letter-spacing:.2px}
+  .btc-badge{display:inline-flex; align-items:center; gap:8px; background:linear-gradient(180deg, #1b2431, #0f151d); padding:10px 14px; border-radius:999px; border:1px solid #1f2835; box-shadow:var(--shadow)}
+  .btc-badge .coin{font-size:20px}
+  .balance{display:flex; flex-direction:column; gap:4px; text-align:right}
+  .balance .label{font-size:12px; color:var(--muted)}
+  .balance .val{font-variant-numeric:tabular-nums; font-weight:700}
+  .panel{background:var(--panel); border:1px solid #1f2835; border-radius:var(--radius); box-shadow:var(--shadow); padding:14px}
+  .row{display:flex; gap:12px; align-items:center; flex-wrap:wrap}
+  .row.stack{flex-direction:column; align-items:stretch}
+  .muted{color:var(--muted)}
+  button{appearance:none; border:none; background:var(--panel-2); color:var(--text); padding:14px 16px; border-radius:14px; font-weight:700; box-shadow:var(--shadow); border:1px solid #1f2835}
+  button:disabled{opacity:.5}
+  button.accent{background:var(--accent); color:#111; border:1px solid #b05f00}
+  button.ghost{background:transparent}
+  .chips{display:flex; gap:8px; flex-wrap:wrap}
+  .chip{padding:10px 12px; border-radius:999px; border:1px solid #243043; background:#0e131b; color:#ccd4e0; font-weight:700; font-size:13px}
+  .chip[data-amt]{cursor:pointer}
+  .bet-input{display:grid; grid-template-columns:1fr auto; gap:10px; align-items:center}
+  .bet-input input[type=number]{width:100%; padding:14px; border-radius:12px; border:1px solid #223045; background:#0e141d; color:var(--text); font-weight:700}
+  .toggle{font-size:12px; padding:8px 10px}
+  .table{margin-top:14px; display:grid; gap:12px}
+  .hand{background:var(--panel); border:1px dashed #243043; border-radius:16px; padding:12px}
+  .hand h3{margin:0 0 6px 0; font-size:14px; color:#cdd6e3; display:flex; align-items:center; justify-content:space-between}
+  .cards{display:flex; gap:10px; flex-wrap:wrap; min-height:68px}
+  .card{width:48px; height:68px; border-radius:10px; background:linear-gradient(180deg,#202a3a,#111723); border:1px solid var(--card-border);
+        display:flex; align-items:center; justify-content:center; font-weight:800; font-size:20px; position:relative}
+  .card.red{color:#ff6b6b}
+  .card span.rank{position:relative; top:-2px}
+  .card span.suit{font-size:14px; position:absolute; bottom:6px}
+  .card.back{background:linear-gradient(135deg,#0e141d 25%, #1a2130 25%, #1a2130 50%, #0e141d 50%, #0e141d 75%, #1a2130 75%); background-size:20px 20px}
+  .totals{font-size:13px; color:var(--muted)}
+  .controls{display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-top:12px}
+  .controls button{padding:12px 8px}
+  .status{margin-top:12px; padding:12px; border-radius:12px; border:1px solid #223045; background:#0e141d; font-weight:700}
+  .status.win{border-color:#245c3a; background:#112118; color:var(--win)}
+  .status.lose{border-color:#5f2324; background:#211012; color:var(--lose)}
+  .status.push{border-color:#5a4b13; background:#1f1a0b; color:var(--push)}
+  .top-actions{display:flex; gap:8px; flex-wrap:wrap}
+  .fine{font-size:11px; color:var(--muted); margin-top:8px}
+  .footer{margin-top:16px; display:flex; justify-content:space-between; align-items:center; gap:10px}
+  .link{color:#c9e4ff; text-decoration:none; border-bottom:1px dotted #325a88}
+  @media (max-width:480px){
+    .controls{grid-template-columns:repeat(2,1fr)}
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="title btc-badge">
+        <div class="coin">₿</div>
+        <div>
+          <div style="font-size:13px; color:#cfd7e3">Blackjack</div>
+          <div style="font-size:11px; color:var(--muted)">6-deck • 3:2 • H17</div>
+        </div>
+      </div>
+      <div class="balance">
+        <div class="label">Bankroll</div>
+        <div class="val" id="bankrollText">₿0.05000000</div>
+        <div class="label" id="bankrollSats">(5,000,000 sats)</div>
+      </div>
+    </header>
+
+    <div class="panel">
+      <div class="row stack">
+        <div class="row" style="justify-content:space-between; width:100%">
+          <div class="muted">Place your bet</div>
+          <div class="top-actions">
+            <button class="toggle" id="unitToggle">Show sats</button>
+            <button class="toggle ghost" id="helpBtn">Help</button>
+            <button class="toggle ghost" id="resetBtn">Reset bankroll</button>
+          </div>
+        </div>
+
+        <div class="bet-input">
+          <input id="betInput" type="number" inputmode="decimal" min="0.00000001" step="0.00000001" placeholder="0.00000000" />
+          <button id="dealBtn" class="accent">Deal</button>
+        </div>
+        <div class="chips" id="chips">
+          <button class="chip" data-amt="0.00001000">+1k sats</button>
+          <button class="chip" data-amt="0.00005000">+5k sats</button>
+          <button class="chip" data-amt="0.00010000">+10k sats</button>
+          <button class="chip" data-amt="0">Clear</button>
+          <button class="chip" id="maxBtn">Max</button>
+        </div>
+        <div class="fine">Tip: tap chips to build a bet. Game auto-shuffles when the shoe is low.</div>
+      </div>
+    </div>
+
+    <div class="table">
+      <div class="hand" id="dealerHandBox">
+        <h3>Dealer <span class="totals" id="dealerTotal">—</span></h3>
+        <div class="cards" id="dealerCards"></div>
+      </div>
+
+      <div class="hand" id="playerHandBox">
+        <h3>You <span class="totals" id="playerTotal">—</span></h3>
+        <div class="cards" id="playerCards"></div>
+      </div>
+
+      <div class="controls">
+        <button id="hitBtn" disabled>Hit</button>
+        <button id="standBtn" disabled>Stand</button>
+        <button id="doubleBtn" disabled>Double</button>
+        <button id="newRoundBtn" disabled>New round</button>
+      </div>
+
+      <div class="status" id="statusBox">Welcome! Place a bet to start.</div>
+      <div class="fine">Rules: Blackjack pays 3:2. Dealer hits soft 17. Double allowed on first two cards. No splits/insurance/surrender.</div>
+    </div>
+
+    <div class="footer">
+      <div class="fine">Just a simulator. BTC amounts are pretend.</div>
+      <a class="link" href="#" id="addTestBtn">Add +0.01000000 test BTC</a>
+    </div>
+  </div>
+
+<script>
+(() => {
+  const START_BANKROLL = 0.05000000; // 0.05 BTC
+  const DECKS = 6;
+  const DEALER_HITS_SOFT_17 = true; // H17
+  const BJ_PAYOUT = 1.5; // 3:2
+  const SHUFFLE_PENETRATION = 0.75; // reshuffle when 75% used
+
+  let shoe = [];
+  let bankroll = loadNumber('btcBankroll', START_BANKROLL);
+  let unitIsBTC = loadBool('unitIsBTC', true);
+  let inRound = false;
+  let canDouble = false;
+  let currentBet = 0;
+  let player = { cards: [] };
+  let dealer = { cards: [] };
+
+  const bankrollText = document.getElementById('bankrollText');
+  const bankrollSats = document.getElementById('bankrollSats');
+  const unitToggle = document.getElementById('unitToggle');
+  const betInput = document.getElementById('betInput');
+  const dealBtn = document.getElementById('dealBtn');
+  const hitBtn = document.getElementById('hitBtn');
+  const standBtn = document.getElementById('standBtn');
+  const doubleBtn = document.getElementById('doubleBtn');
+  const newRoundBtn = document.getElementById('newRoundBtn');
+  const statusBox = document.getElementById('statusBox');
+  const dealerCardsEl = document.getElementById('dealerCards');
+  const playerCardsEl = document.getElementById('playerCards');
+  const dealerTotalEl = document.getElementById('dealerTotal');
+  const playerTotalEl = document.getElementById('playerTotal');
+  const maxBtn = document.getElementById('maxBtn');
+  const chips = document.getElementById('chips');
+  const resetBtn = document.getElementById('resetBtn');
+  const helpBtn = document.getElementById('helpBtn');
+  const addTestBtn = document.getElementById('addTestBtn');
+
+  updateBankrollUI();
+  buildAndShuffleShoe();
+
+  function saveNumber(k, v){ localStorage.setItem(k, String(v)); }
+  function loadNumber(k, def){ const v = parseFloat(localStorage.getItem(k)); return Number.isFinite(v) ? v : def; }
+  function saveBool(k, v){ localStorage.setItem(k, v ? '1':'0'); }
+  function loadBool(k, def){ const v = localStorage.getItem(k); return v===null ? def : v==='1'; }
+
+  function satsFromBTC(btc){ return Math.round(btc * 1e8); }
+  function fmtBTC(b){ return '₿' + (Math.floor(b*1e8)/1e8).toFixed(8); }
+  function fmtSats(b){ const s = satsFromBTC(b).toLocaleString(); return `(${s} sats)`; }
+  function fmtAmount(b){ return unitIsBTC ? fmtBTC(b) : `${satsFromBTC(b).toLocaleString()} sats`; }
+
+  function updateBankrollUI(){
+    bankrollText.textContent = fmtBTC(bankroll);
+    bankrollSats.textContent = fmtSats(bankroll);
+    unitToggle.textContent = unitIsBTC ? 'Show sats' : 'Show BTC';
+  }
+
+  function setStatus(text, type=null){
+    statusBox.className = 'status';
+    if(type==='win') statusBox.classList.add('win');
+    if(type==='lose') statusBox.classList.add('lose');
+    if(type==='push') statusBox.classList.add('push');
+    statusBox.textContent = text;
+  }
+
+  function buildAndShuffleShoe(){
+    shoe = [];
+    const suits = ['♠','♥','♦','♣'];
+    const ranks = ['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
+    for(let d=0; d<DECKS; d++){
+      for(const s of suits){
+        for(const r of ranks){
+          shoe.push({rank:r, suit:s});
+        }
+      }
+    }
+    for(let i=shoe.length-1; i>0; i--){
+      const j = Math.floor(Math.random()*(i+1));
+      [shoe[i],shoe[j]] = [shoe[j],shoe[i]];
+    }
+  }
+
+  function maybeReshuffle(){
+    const usedRatio = 1 - (shoe.length / (52*DECKS));
+    if(usedRatio >= SHUFFLE_PENETRATION){
+      buildAndShuffleShoe();
+      setStatus('Shuffling new shoe…', null);
+    }
+  }
+
+  function drawCard(){
+    if(shoe.length===0) buildAndShuffleShoe();
+    return shoe.pop();
+  }
+
+  function handValue(cards){
+    let total = 0;
+    let aces = 0;
+    for(const c of cards){
+      if(c.rank==='A'){ total += 11; aces++; }
+      else if(['K','Q','J'].includes(c.rank)){ total += 10; }
+      else total += parseInt(c.rank,10);
+    }
+    while(total>21 && aces>0){ total -= 10; aces--; }
+    const soft = cards.some(c=>c.rank==='A') && total<=21 && (aces>0);
+    return { total, soft };
+  }
+
+  function isBlackjack(cards){
+    if(cards.length!==2) return false;
+    const ranks = cards.map(c=>c.rank);
+    const hasA = ranks.includes('A');
+    const hasTenVal = ranks.some(r=>['10','J','Q','K'].includes(r));
+    return hasA && hasTenVal;
+  }
+
+  function renderHands(showDealerHole=false){
+    dealerCardsEl.innerHTML = '';
+    dealer.cards.forEach((c, idx) => {
+      const el = document.createElement('div');
+      if(idx===1 && !showDealerHole){ el.className='card back'; dealerTotalEl.textContent='??'; }
+      else{
+        el.className = 'card ' + ((c.suit==='♥'||c.suit==='♦')?'red':'');
+        el.innerHTML = `<span class="rank">${c.rank}</span><span class="suit">${c.suit}</span>`;
+      }
+      dealerCardsEl.appendChild(el);
+    });
+    if(showDealerHole){
+      const dv = handValue(dealer.cards);
+      dealerTotalEl.textContent = `${dv.total}${dv.soft?' (soft)':''}`;
+    }
+
+    playerCardsEl.innerHTML = '';
+    player.cards.forEach(c => {
+      const el = document.createElement('div');
+      el.className = 'card ' + ((c.suit==='♥'||c.suit==='♦')?'red':'');
+      el.innerHTML = `<span class="rank">${c.rank}</span><span class="suit">${c.suit}</span>`;
+      playerCardsEl.appendChild(el);
+    });
+    const pv = handValue(player.cards);
+    playerTotalEl.textContent = `${pv.total}${pv.soft?' (soft)':''}`;
+  }
+
+  function enableBettingUI(enable){
+    betInput.disabled = !enable;
+    Array.from(document.querySelectorAll('.chip')).forEach(c=>c.disabled=!enable);
+    dealBtn.disabled = !enable;
+  }
+  function enablePlayUI(enable){
+    hitBtn.disabled = !enable;
+    standBtn.disabled = !enable;
+    doubleBtn.disabled = !enable || !canDouble;
+    newRoundBtn.disabled = enable;
+  }
+
+  function clampBetToBankroll(){
+    let v = parseFloat(betInput.value || '0');
+    if(!Number.isFinite(v) || v<0) v = 0;
+    if(v>bankroll) v = bankroll;
+    betInput.value = v.toFixed(8);
+  }
+
+  function startRound(){
+    maybeReshuffle();
+    clampBetToBankroll();
+    currentBet = parseFloat(betInput.value);
+    if(!Number.isFinite(currentBet) || currentBet <= 0){ setStatus('Enter a valid bet first.', null); return; }
+    if(currentBet > bankroll){ setStatus('Bet exceeds bankroll.', 'lose'); return; }
+
+    inRound = true;
+    canDouble = true;
+
+    bankroll -= currentBet;
+    saveNumber('btcBankroll', bankroll);
+    updateBankrollUI();
+
+    player.cards = [];
+    dealer.cards = [];
+
+    player.cards.push(drawCard());
+    dealer.cards.push(drawCard());
+    player.cards.push(drawCard());
+    dealer.cards.push(drawCard());
+
+    renderHands(false);
+    enableBettingUI(false);
+    enablePlayUI(true);
+    setStatus(`Bet locked: ${fmtAmount(currentBet)} — your move.`, null);
+
+    const playerBJ = isBlackjack(player.cards);
+    const dealerBJ = isBlackjack(dealer.cards);
+    if(playerBJ || dealerBJ){
+      resolveNaturals(playerBJ, dealerBJ);
+    }
+  }
+
+  function resolveNaturals(playerBJ, dealerBJ){
+    renderHands(true);
+    enablePlayUI(false);
+    inRound = false;
+
+    if(playerBJ && dealerBJ){
+      bankroll += currentBet;
+      setStatus('Both have blackjack — Push.', 'push');
+    } else if(playerBJ){
+      const winAmt = currentBet + currentBet * BJ_PAYOUT;
+      bankroll += winAmt;
+      setStatus(`Blackjack! You win ${fmtAmount(currentBet * BJ_PAYOUT)}.`, 'win');
+    } else if(dealerBJ){
+      setStatus('Dealer has blackjack. You lose.', 'lose');
+    }
+    saveNumber('btcBankroll', bankroll);
+    updateBankrollUI();
+    newRoundBtn.disabled = false;
+  }
+
+  function onHit(){
+    if(!inRound) return;
+    player.cards.push(drawCard());
+    canDouble = false;
+    renderHands(false);
+
+    const v = handValue(player.cards).total;
+    if(v>21){
+      endRoundDealerSkipped('Busted. You lose.');
+    }
+  }
+
+  function onStand(){
+    if(!inRound) return;
+    canDouble = false;
+    dealerPlayAndSettle();
+  }
+
+  function onDouble(){
+    if(!inRound || !canDouble) return;
+    if(bankroll < currentBet){
+      setStatus('Not enough bankroll to double.', null);
+      return;
+    }
+    bankroll -= currentBet;
+    saveNumber('btcBankroll', bankroll);
+    updateBankrollUI();
+
+    currentBet *= 2;
+    canDouble = false;
+
+    player.cards.push(drawCard());
+    renderHands(false);
+    const v = handValue(player.cards).total;
+    if(v>21){
+      endRoundDealerSkipped('Busted after doubling. You lose.');
+      return;
+    }
+    dealerPlayAndSettle();
+  }
+
+  function dealerPlayAndSettle(){
+    enablePlayUI(false);
+    renderHands(true);
+    let dv = handValue(dealer.cards);
+    while(dv.total < 17 || (DEALER_HITS_SOFT_17 && dv.total===17 && dv.soft)){
+      dealer.cards.push(drawCard());
+      renderHands(true);
+      dv = handValue(dealer.cards);
+    }
+    settle();
+  }
+
+  function settle(){
+    const pv = handValue(player.cards).total;
+    const dv = handValue(dealer.cards).total;
+    let resultText = '';
+    let type = null;
+
+    if(dv>21){
+      bankroll += currentBet * 2;
+      resultText = `Dealer busts. You win ${fmtAmount(currentBet)}.`;
+      type = 'win';
+    } else if(pv>dv){
+      bankroll += currentBet * 2;
+      resultText = `You win ${fmtAmount(currentBet)}.`;
+      type = 'win';
+    } else if(pv<dv){
+      resultText = 'You lose.';
+      type = 'lose';
+    } else {
+      bankroll += currentBet;
+      resultText = 'Push.';
+      type = 'push';
+    }
+
+    saveNumber('btcBankroll', bankroll);
+    updateBankrollUI();
+    setStatus(resultText, type);
+    inRound = false;
+    newRoundBtn.disabled = false;
+  }
+
+  function endRoundDealerSkipped(message){
+    renderHands(true);
+    setStatus(message, 'lose');
+    enablePlayUI(false);
+    inRound = false;
+    newRoundBtn.disabled = false;
+  }
+
+  function clearTable(){
+    player.cards = [];
+    dealer.cards = [];
+    currentBet = 0;
+    playerCardsEl.innerHTML = '';
+    dealerCardsEl.innerHTML = '';
+    dealerTotalEl.textContent = '—';
+    playerTotalEl.textContent = '—';
+  }
+
+  dealBtn.addEventListener('click', startRound);
+  hitBtn.addEventListener('click', onHit);
+  standBtn.addEventListener('click', onStand);
+  doubleBtn.addEventListener('click', onDouble);
+  newRoundBtn.addEventListener('click', () => {
+    clearTable();
+    enableBettingUI(true);
+    enablePlayUI(false);
+    setStatus('Place your next bet.', null);
+  });
+
+  chips.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-amt]');
+    if(!btn || betInput.disabled) return;
+    const amt = parseFloat(btn.getAttribute('data-amt'));
+    if(amt===0){ betInput.value = (0).toFixed(8); return; }
+    const cur = parseFloat(betInput.value || '0');
+    let next = cur + amt;
+    if(next > bankroll) next = bankroll;
+    betInput.value = next.toFixed(8);
+  });
+
+  document.getElementById('maxBtn').addEventListener('click', () => {
+    if(betInput.disabled) return;
+    betInput.value = bankroll.toFixed(8);
+  });
+
+  betInput.addEventListener('input', clampBetToBankroll);
+
+  unitToggle.addEventListener('click', () => {
+    unitIsBTC = !unitIsBTC;
+    saveBool('unitIsBTC', unitIsBTC);
+    updateBankrollUI();
+    setStatus(unitIsBTC ? 'Showing BTC.' : 'Showing sats.', null);
+  });
+
+  document.getElementById('resetBtn').addEventListener('click', () => {
+    if(inRound){ setStatus('Finish the current hand before resetting.', null); return; }
+    bankroll = START_BANKROLL;
+    saveNumber('btcBankroll', bankroll);
+    updateBankrollUI();
+    setStatus('Bankroll reset.', null);
+  });
+
+  document.getElementById('helpBtn').addEventListener('click', () => {
+    alert(
+`Quick how-to:
+• Set a bet with chips or the number box (BTC units).
+• Tap Deal, then Hit/Stand. Double is available on your first move (if you can afford it).
+• Blackjack pays 3:2. Dealer hits soft 17. 6-deck shoe with auto-reshuffle.
+• Toggle sats/BTC at the top. Bankroll is saved on your device.`
+    );
+  });
+
+  document.getElementById('addTestBtn').addEventListener('click', (e) => {
+    e.preventDefault();
+    if(inRound){ setStatus('Finish the current hand first.', null); return; }
+    bankroll += 0.01000000;
+    saveNumber('btcBankroll', bankroll);
+    updateBankrollUI();
+    setStatus('Added +0.01000000 test BTC.', 'win');
+  });
+
+})();
+</script>
+</body>
+</html>
