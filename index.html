@@ -5,16 +5,9 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
 <title>₿ Blackjack</title>
 
-<!-- PWA bits -->
+<!-- iPhone full-screen feel when added to Home Screen -->
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
-<link rel="manifest" href="manifest.webmanifest">
-<link rel="apple-touch-icon" href="icons/icon-192.png">
-<script>
-  if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js'));
-  }
-</script>
 
 <style>
   :root{
@@ -23,7 +16,7 @@
     --panel-2:#0f141b;
     --text:#e6e6e6;
     --muted:#99a3af;
-    --accent:#f7931a;
+    --accent:#f7931a; /* Bitcoin orange */
     --win:#2ecc71;
     --lose:#ff4d4f;
     --push:#ffd166;
@@ -41,7 +34,7 @@
   .btc-badge .coin{font-size:20px}
   .balance{display:flex; flex-direction:column; gap:4px; text-align:right}
   .balance .label{font-size:12px; color:var(--muted)}
-  .balance .val{font-variant-numeric:tabular-nums; font-weight:700}
+  .balance .val{font-variant-numeric:tabular-nums; font-weight:700; transition:background .3s}
   .panel{background:var(--panel); border:1px solid #1f2835; border-radius:var(--radius); box-shadow:var(--shadow); padding:14px}
   .row{display:flex; gap:12px; align-items:center; flex-wrap:wrap}
   .row.stack{flex-direction:column; align-items:stretch}
@@ -59,9 +52,9 @@
   .table{margin-top:14px; display:grid; gap:12px}
   .hand{background:var(--panel); border:1px dashed #243043; border-radius:16px; padding:12px}
   .hand h3{margin:0 0 6px 0; font-size:14px; color:#cdd6e3; display:flex; align-items:center; justify-content:space-between}
-  .cards{display:flex; gap:10px; flex-wrap:wrap; min-height:68px}
+  .cards{display:flex; gap:10px; flex-wrap:wrap; min-height:68px; perspective:800px; transform-style:preserve-3d}
   .card{width:48px; height:68px; border-radius:10px; background:linear-gradient(180deg,#202a3a,#111723); border:1px solid var(--card-border);
-        display:flex; align-items:center; justify-content:center; font-weight:800; font-size:20px; position:relative}
+        display:flex; align-items:center; justify-content:center; font-weight:800; font-size:20px; position:relative; backface-visibility:hidden}
   .card.red{color:#ff6b6b}
   .card span.rank{position:relative; top:-2px}
   .card span.suit{font-size:14px; position:absolute; bottom:6px}
@@ -77,9 +70,32 @@
   .fine{font-size:11px; color:var(--muted); margin-top:8px}
   .footer{margin-top:16px; display:flex; justify-content:space-between; align-items:center; gap:10px}
   .link{color:#c9e4ff; text-decoration:none; border-bottom:1px dotted #325a88}
-  @media (max-width:480px){
-    .controls{grid-template-columns:repeat(2,1fr)}
+  @media (max-width:480px){ .controls{grid-template-columns:repeat(2,1fr)} }
+
+  /* === Animations === */
+  @keyframes deal {
+    0% { transform: translate3d(80px,-120px,0) rotate(12deg); opacity:0; }
+    100%{ transform: translate3d(0,0,0) rotate(0deg); opacity:1; }
   }
+  @keyframes flip {
+    0% { transform: rotateY(0); }
+    49%{ transform: rotateY(90deg); }
+    51%{ transform: rotateY(90deg); }
+    100%{ transform: rotateY(180deg); }
+  }
+  @keyframes statusFlashWin { from{box-shadow:0 0 0 rgba(46,204,113,0)} to{box-shadow:0 0 24px rgba(46,204,113,.5)} }
+  @keyframes statusFlashLose{ from{box-shadow:0 0 0 rgba(255,77,79,0)}  to{box-shadow:0 0 24px rgba(255,77,79,.45)} }
+  @keyframes statusFlashPush{ from{box-shadow:0 0 0 rgba(255,209,102,0)} to{box-shadow:0 0 24px rgba(255,209,102,.45)} }
+  @keyframes bankrollUp   { from{background:transparent} to{background:rgba(46,204,113,.15)} }
+  @keyframes bankrollDown { from{background:transparent} to{background:rgba(255,77,79,.12)} }
+
+  .card.anim-deal{opacity:0; animation:deal .36s var(--delay,0s) ease-out forwards; will-change:transform,opacity}
+  .card.anim-flip{animation:flip .38s ease-in-out forwards}
+  .status.fx-win{animation:statusFlashWin .25s ease-out forwards}
+  .status.fx-lose{animation:statusFlashLose .25s ease-out forwards}
+  .status.fx-push{animation:statusFlashPush .25s ease-out forwards}
+  .balance .val.pulse-up{animation:bankrollUp .6s ease-out; border-radius:8px; padding:2px 4px}
+  .balance .val.pulse-down{animation:bankrollDown .6s ease-out; border-radius:8px; padding:2px 4px}
 </style>
 </head>
 <body>
@@ -121,7 +137,7 @@
           <button class="chip" data-amt="0">Clear</button>
           <button class="chip" id="maxBtn">Max</button>
         </div>
-        <div class="fine">Tip: tap chips to build a bet. Game auto-shuffles when the shoe is low.</div>
+        <div class="fine">Tip: tap chips to build a bet. Auto-shuffles when the shoe is low.</div>
       </div>
     </div>
 
@@ -155,12 +171,14 @@
 
 <script>
 (() => {
+  // ====== Settings ======
   const START_BANKROLL = 0.05000000; // 0.05 BTC
   const DECKS = 6;
   const DEALER_HITS_SOFT_17 = true; // H17
   const BJ_PAYOUT = 1.5; // 3:2
   const SHUFFLE_PENETRATION = 0.75; // reshuffle when 75% used
 
+  // ====== State ======
   let shoe = [];
   let bankroll = loadNumber('btcBankroll', START_BANKROLL);
   let unitIsBTC = loadBool('unitIsBTC', true);
@@ -170,6 +188,7 @@
   let player = { cards: [] };
   let dealer = { cards: [] };
 
+  // ====== DOM ======
   const bankrollText = document.getElementById('bankrollText');
   const bankrollSats = document.getElementById('bankrollSats');
   const unitToggle = document.getElementById('unitToggle');
@@ -190,9 +209,11 @@
   const helpBtn = document.getElementById('helpBtn');
   const addTestBtn = document.getElementById('addTestBtn');
 
+  // ====== Init ======
   updateBankrollUI();
   buildAndShuffleShoe();
 
+  // ====== Utils ======
   function saveNumber(k, v){ localStorage.setItem(k, String(v)); }
   function loadNumber(k, def){ const v = parseFloat(localStorage.getItem(k)); return Number.isFinite(v) ? v : def; }
   function saveBool(k, v){ localStorage.setItem(k, v ? '1':'0'); }
@@ -228,6 +249,7 @@
         }
       }
     }
+    // Fisher-Yates
     for(let i=shoe.length-1; i>0; i--){
       const j = Math.floor(Math.random()*(i+1));
       [shoe[i],shoe[j]] = [shoe[j],shoe[i]];
@@ -256,7 +278,7 @@
       else total += parseInt(c.rank,10);
     }
     while(total>21 && aces>0){ total -= 10; aces--; }
-    const soft = cards.some(c=>c.rank==='A') && total<=21 && (aces>0);
+    const soft = aces>0; // if any ace still counted as 11
     return { total, soft };
   }
 
@@ -268,29 +290,69 @@
     return hasA && hasTenVal;
   }
 
+  // === Animation helpers ===
+  function createCardEl(card, isRed){
+    const el = document.createElement('div');
+    el.className = 'card ' + (isRed ? 'red ' : '');
+    el.innerHTML = `<span class="rank">${card.rank}</span><span class="suit">${card.suit}</span>`;
+    return el;
+  }
+
+  function appendAnimatedCard(targetEl, cardObj, index){
+    const isRed = (cardObj.suit==='♥'||cardObj.suit==='♦');
+    const el = createCardEl(cardObj, isRed);
+    el.classList.add('anim-deal');
+    el.style.setProperty('--delay', `${index*0.06}s`);
+    targetEl.appendChild(el);
+  }
+
+  function pulseBankroll(direction){
+    const cls = direction==='up' ? 'pulse-up' : 'pulse-down';
+    bankrollText.classList.remove('pulse-up','pulse-down');
+    void bankrollText.offsetWidth; // reflow to restart animation
+    bankrollText.classList.add(cls);
+  }
+
+  function flashStatus(type){ // 'win' | 'lose' | 'push'
+    statusBox.classList.remove('fx-win','fx-lose','fx-push');
+    void statusBox.offsetWidth;
+    if(type==='win') statusBox.classList.add('fx-win');
+    if(type==='lose') statusBox.classList.add('fx-lose');
+    if(type==='push') statusBox.classList.add('fx-push');
+  }
+
+  // ====== Rendering ======
   function renderHands(showDealerHole=false){
+    // Dealer
     dealerCardsEl.innerHTML = '';
     dealer.cards.forEach((c, idx) => {
-      const el = document.createElement('div');
-      if(idx===1 && !showDealerHole){ el.className='card back'; dealerTotalEl.textContent='??'; }
-      else{
-        el.className = 'card ' + ((c.suit==='♥'||c.suit==='♦')?'red':'');
-        el.innerHTML = `<span class="rank">${c.rank}</span><span class="suit">${c.suit}</span>`;
+      if(idx===1 && !showDealerHole){
+        const back = document.createElement('div');
+        back.className = 'card back anim-deal';
+        back.style.setProperty('--delay', `${idx*0.06}s`);
+        dealerCardsEl.appendChild(back);
+        dealerTotalEl.textContent = '??';
+      } else {
+        appendAnimatedCard(dealerCardsEl, c, idx);
       }
-      dealerCardsEl.appendChild(el);
     });
+
     if(showDealerHole){
       const dv = handValue(dealer.cards);
       dealerTotalEl.textContent = `${dv.total}${dv.soft?' (soft)':''}`;
+      // flip the second card if it was hidden
+      const second = dealerCardsEl.children[1];
+      if(second && second.classList.contains('back')){
+        const real = createCardEl(dealer.cards[1], (dealer.cards[1].suit==='♥'||dealer.cards[1].suit==='♦'));
+        real.classList.add('anim-flip');
+        dealerCardsEl.replaceChild(real, second);
+      }
     }
 
+    // Player
     playerCardsEl.innerHTML = '';
-    player.cards.forEach(c => {
-      const el = document.createElement('div');
-      el.className = 'card ' + ((c.suit==='♥'||c.suit==='♦')?'red':'');
-      el.innerHTML = `<span class="rank">${c.rank}</span><span class="suit">${c.suit}</span>`;
-      playerCardsEl.appendChild(el);
-    });
+    player.cards.forEach((c, idx) => appendAnimatedCard(playerCardsEl, c, idx));
+
     const pv = handValue(player.cards);
     playerTotalEl.textContent = `${pv.total}${pv.soft?' (soft)':''}`;
   }
@@ -304,7 +366,7 @@
     hitBtn.disabled = !enable;
     standBtn.disabled = !enable;
     doubleBtn.disabled = !enable || !canDouble;
-    newRoundBtn.disabled = enable;
+    newRoundBtn.disabled = enable; // opposite
   }
 
   function clampBetToBankroll(){
@@ -314,6 +376,7 @@
     betInput.value = v.toFixed(8);
   }
 
+  // ====== Round Flow ======
   function startRound(){
     maybeReshuffle();
     clampBetToBankroll();
@@ -327,10 +390,12 @@
     bankroll -= currentBet;
     saveNumber('btcBankroll', bankroll);
     updateBankrollUI();
+    pulseBankroll('down');
 
     player.cards = [];
     dealer.cards = [];
 
+    // initial deal
     player.cards.push(drawCard());
     dealer.cards.push(drawCard());
     player.cards.push(drawCard());
@@ -341,6 +406,7 @@
     enablePlayUI(true);
     setStatus(`Bet locked: ${fmtAmount(currentBet)} — your move.`, null);
 
+    // Natural blackjack check
     const playerBJ = isBlackjack(player.cards);
     const dealerBJ = isBlackjack(dealer.cards);
     if(playerBJ || dealerBJ){
@@ -353,18 +419,27 @@
     enablePlayUI(false);
     inRound = false;
 
+    let outcomeType = null;
+
     if(playerBJ && dealerBJ){
-      bankroll += currentBet;
+      bankroll += currentBet; // push
       setStatus('Both have blackjack — Push.', 'push');
+      outcomeType = 'push';
     } else if(playerBJ){
       const winAmt = currentBet + currentBet * BJ_PAYOUT;
       bankroll += winAmt;
       setStatus(`Blackjack! You win ${fmtAmount(currentBet * BJ_PAYOUT)}.`, 'win');
+      outcomeType = 'win';
     } else if(dealerBJ){
       setStatus('Dealer has blackjack. You lose.', 'lose');
+      outcomeType = 'lose';
     }
     saveNumber('btcBankroll', bankroll);
     updateBankrollUI();
+
+    if(outcomeType==='win') pulseBankroll('up');
+    flashStatus(outcomeType||'push');
+
     newRoundBtn.disabled = false;
   }
 
@@ -377,6 +452,7 @@
     const v = handValue(player.cards).total;
     if(v>21){
       endRoundDealerSkipped('Busted. You lose.');
+      flashStatus('lose');
     }
   }
 
@@ -388,6 +464,7 @@
 
   function onDouble(){
     if(!inRound || !canDouble) return;
+    // must have enough bankroll to double
     if(bankroll < currentBet){
       setStatus('Not enough bankroll to double.', null);
       return;
@@ -395,15 +472,18 @@
     bankroll -= currentBet;
     saveNumber('btcBankroll', bankroll);
     updateBankrollUI();
+    pulseBankroll('down');
 
     currentBet *= 2;
     canDouble = false;
 
+    // draw one card then stand
     player.cards.push(drawCard());
     renderHands(false);
     const v = handValue(player.cards).total;
     if(v>21){
       endRoundDealerSkipped('Busted after doubling. You lose.');
+      flashStatus('lose');
       return;
     }
     dealerPlayAndSettle();
@@ -411,7 +491,9 @@
 
   function dealerPlayAndSettle(){
     enablePlayUI(false);
+    // reveal hole card
     renderHands(true);
+    // dealer draws
     let dv = handValue(dealer.cards);
     while(dv.total < 17 || (DEALER_HITS_SOFT_17 && dv.total===17 && dv.soft)){
       dealer.cards.push(drawCard());
@@ -424,6 +506,7 @@
   function settle(){
     const pv = handValue(player.cards).total;
     const dv = handValue(dealer.cards).total;
+
     let resultText = '';
     let type = null;
 
@@ -439,7 +522,7 @@
       resultText = 'You lose.';
       type = 'lose';
     } else {
-      bankroll += currentBet;
+      bankroll += currentBet; // push
       resultText = 'Push.';
       type = 'push';
     }
@@ -447,6 +530,9 @@
     saveNumber('btcBankroll', bankroll);
     updateBankrollUI();
     setStatus(resultText, type);
+    if(type==='win') pulseBankroll('up');
+    flashStatus(type);
+
     inRound = false;
     newRoundBtn.disabled = false;
   }
@@ -469,6 +555,7 @@
     playerTotalEl.textContent = '—';
   }
 
+  // ====== Events ======
   dealBtn.addEventListener('click', startRound);
   hitBtn.addEventListener('click', onHit);
   standBtn.addEventListener('click', onStand);
@@ -491,7 +578,7 @@
     betInput.value = next.toFixed(8);
   });
 
-  document.getElementById('maxBtn').addEventListener('click', () => {
+  maxBtn.addEventListener('click', () => {
     if(betInput.disabled) return;
     betInput.value = bankroll.toFixed(8);
   });
@@ -505,7 +592,7 @@
     setStatus(unitIsBTC ? 'Showing BTC.' : 'Showing sats.', null);
   });
 
-  document.getElementById('resetBtn').addEventListener('click', () => {
+  resetBtn.addEventListener('click', () => {
     if(inRound){ setStatus('Finish the current hand before resetting.', null); return; }
     bankroll = START_BANKROLL;
     saveNumber('btcBankroll', bankroll);
@@ -513,7 +600,7 @@
     setStatus('Bankroll reset.', null);
   });
 
-  document.getElementById('helpBtn').addEventListener('click', () => {
+  helpBtn.addEventListener('click', () => {
     alert(
 `Quick how-to:
 • Set a bet with chips or the number box (BTC units).
@@ -523,13 +610,15 @@
     );
   });
 
-  document.getElementById('addTestBtn').addEventListener('click', (e) => {
+  addTestBtn.addEventListener('click', (e) => {
     e.preventDefault();
     if(inRound){ setStatus('Finish the current hand first.', null); return; }
     bankroll += 0.01000000;
     saveNumber('btcBankroll', bankroll);
     updateBankrollUI();
     setStatus('Added +0.01000000 test BTC.', 'win');
+    pulseBankroll('up');
+    flashStatus('win');
   });
 
 })();
